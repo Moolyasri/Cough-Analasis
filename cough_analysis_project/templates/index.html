@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cough Analysis System</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f2f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #1a73e8;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .upload-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .recorder, .upload {
+            margin: 15px 0;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 4px;
+            background-color: #1a73e8;
+            color: white;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #1557b0;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        input[type="file"] {
+            display: block;
+            margin: 10px auto;
+            padding: 10px;
+        }
+        .result-section {
+            margin-top: 20px;
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            background-color: #f8f9fa;
+        }
+        .hidden {
+            display: none;
+        }
+        #allProbabilities {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: white;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Cough Analysis System</h1>
+        <div class="upload-section">
+            <div class="recorder">
+                <button id="startRecord">Start Recording</button>
+                <button id="stopRecord" disabled>Stop Recording</button>
+            </div>
+            <div class="upload">
+                <input type="file" id="audioFile" accept=".wav,.mp3,.m4a">
+                <button id="uploadBtn">Upload Audio</button>
+            </div>
+        </div>
+        <div id="result" class="result-section hidden">
+            <h2>Analysis Result</h2>
+            <p>Detected Disease: <span id="disease"></span></p>
+            <p>Confidence: <span id="confidence"></span>%</p>
+            <div id="allProbabilities"></div>
+        </div>
+    </div>
+
+    <script>
+// Global variables for recording
+let mediaRecorder;
+let audioChunks = [];
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', () => {
+    initializeButtons();
+    setupEventListeners();
+    checkMicrophonePermission();
+});
+
+// Initialize all buttons and input elements
+function initializeButtons() {
+    const startRecordButton = document.getElementById('startRecord');
+    const stopRecordButton = document.getElementById('stopRecord');
+    const uploadButton = document.getElementById('uploadBtn');
+    const audioFileInput = document.getElementById('audioFile');
+
+    // Initially disable stop button
+    stopRecordButton.disabled = true;
+
+    // Disable upload button if no file selected
+    uploadButton.disabled = !audioFileInput.files.length;
+}
+
+// Setup all event listeners
+function setupEventListeners() {
+    document.getElementById('startRecord').addEventListener('click', startRecording);
+    document.getElementById('stopRecord').addEventListener('click', stopRecording);
+    document.getElementById('uploadBtn').addEventListener('click', handleFileUpload);
+    document.getElementById('audioFile').addEventListener('change', handleFileSelection);
+}
+
+// Check for microphone permission
+async function checkMicrophonePermission() {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach(track => track.stop());
+        showMessage('Microphone access granted', 'success');
+    } catch (err) {
+        showMessage('Microphone access denied. Please enable microphone access.', 'error');
+        document.getElementById('startRecord').disabled = true;
+    }
+}
+
+// Handle file selection
+function handleFileSelection(event) {
+    const fileInput = event.target;
+    const uploadButton = document.getElementById('uploadBtn');
+    const fileName = fileInput.files[0]?.name;
+
+    uploadButton.disabled = !fileName;
+    if (fileName) {
+        showMessage(`File selected: ${fileName}`, 'success');
+    }
+}
+
+// Start recording function
+async function startRecording() {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+        
+        mediaRecorder.ondataavailable = (event) => {
+            audioChunks.push(event.data);
+        };
+        
+        mediaRecorder.onstop = () => {
+            const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+            uploadAudio(audioBlob);
+            audioChunks = [];
+            
+            // Stop all tracks
+            stream.getTracks().forEach(track => track.stop());
+        };
+        
+        // Start recording
+        mediaRecorder.start();
+        updateUIForRecording(true);
+        showMessage('Recording started...', 'success');
+        
+        // Auto-stop after 10 seconds
+        setTimeout(() => {
+            if (mediaRecorder.state === 'recording') {
+                stopRecording();
+            }
+        }, 10000);
+
+    } catch (err) {
+        console.error('Error accessing microphone:', err);
+        showMessage('Error accessing microphone. Please check permissions.', 'error');
+    }
+}
+
+// Stop recording function
+function stopRecording() {
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+        updateUIForRecording(false);
+        showMessage('Processing recording...', 'success');
+    }
+}
+
+// Update UI elements during recording
+function updateUIForRecording(isRecording) {
+    document.getElementById('startRecord').disabled = isRecording;
+    document.getElementById('stopRecord').disabled = !isRecording;
+    document.getElementById('uploadBtn').disabled = isRecording;
+    document.getElementById('audioFile').disabled = isRecording;
+}
+
+// Handle file upload button click
+function handleFileUpload() {
+    const fileInput = document.getElementById('audioFile');
+    if (fileInput.files.length > 0) {
+        uploadAudio(fileInput.files[0]);
+    } else {
+        showMessage('Please select an audio file first.', 'error');
+    }
+}
+
+// Upload audio to server
+function uploadAudio(blob) {
+    const formData = new FormData();
+    formData.append('audio', blob);
+    
+    showMessage('Analyzing audio...', 'success');
+    
+    fetch('/upload', {
+        method: 'POST',
+        body: formData
+    })
+    .then(handleResponse)
+    .then(handleData)
+    .catch(handleError);
+}
+
+// Handle server response
+function handleResponse(response) {
+    if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return response.json();
+}
+
+// Handle data from server
+function handleData(data) {
+    if (data.error) {
+        throw new Error(data.error);
+    }
+    displayResults(data.prediction);
+    showMessage('Analysis complete!', 'success');
+}
+
+// Handle errors
+function handleError(error) {
+    console.error('Error:', error);
+    showMessage(`Error: ${error.message}`, 'error');
+}
+
+// Display results in UI
+function displayResults(prediction) {
+    const resultDiv = document.getElementById('result');
+    resultDiv.classList.remove('hidden');
+    
+    // Clear previous results
+    resultDiv.innerHTML = `
+        <h2>Analysis Result</h2>
+        <div class="result-content">
+            <div class="primary-result">
+                <h3>Primary Diagnosis</h3>
+                <p class="disease-name">${prediction.disease}</p>
+                <p class="confidence">Confidence: ${(prediction.confidence * 100).toFixed(2)}%</p>
+                <p class="timestamp">Analyzed: ${prediction.timestamp}</p>
+            </div>
+            
+            <div class="disease-details">
+                <h3>Disease Information</h3>
+                <p class="severity">Severity: ${prediction.disease_info.severity}</p>
+                <p class="contagious">Contagious: ${prediction.disease_info.contagious ? 'Yes' : 'No'}</p>
+                <p class="recovery">Expected Recovery: ${prediction.disease_info.recovery_time}</p>
+            </div>
+
+            <div class="symptoms">
+                <h3>Common Symptoms</h3>
+                <ul>
+                    ${prediction.disease_info.symptoms.map(symptom => 
+                        `<li>${symptom}</li>`
+                    ).join('')}
+                </ul>
+            </div>
+
+            <div class="recommendations">
+                <h3>Recommendations</h3>
+                <ul>
+                    ${prediction.disease_info.recommendations.map(rec => 
+                        `<li>${rec}</li>`
+                    ).join('')}
+                </ul>
+            </div>
+
+            <div class="analysis-details">
+                <h3>Cough Analysis</h3>
+                <div class="analysis-grid">
+                    <p>Intensity: ${prediction.analysis_details.cough_intensity}</p>
+                    <p>Frequency: ${prediction.analysis_details.cough_frequency}</p>
+                    <p>Type: ${prediction.analysis_details.cough_type}</p>
+                </div>
+            </div>
+
+            <div class="other-probabilities">
+                <h3>Other Possibilities</h3>
+                <div class="probability-bars">
+                    ${Object.entries(prediction.all_probabilities)
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([disease, prob]) => `
+                            <div class="prob-item">
+                                <span class="disease-label">${disease}</span>
+                                <div class="prob-bar-container">
+                                    <div class="prob-bar" style="width: ${(prob * 100).toFixed(2)}%"></div>
+                                    <span class="prob-value">${(prob * 100).toFixed(2)}%</span>
+                                </div>
+                            </div>
+                        `).join('')}
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Scroll to results
+    resultDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// Show message to user
+function showMessage(message, type) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${type}-message`;
+    messageDiv.textContent = message;
+    
+    const container = document.querySelector('.container');
+    const existingMessage = container.querySelector('.message');
+    if (existingMessage) {
+        existingMessage.remove();
+    }
+    
+    container.insertBefore(messageDiv, container.firstChild);
+    
+    // Remove message after 5 seconds
+    setTimeout(() => {
+        messageDiv.style.opacity = '0';
+        setTimeout(() => messageDiv.remove(), 500);
+    }, 5000);
+}
+
+// Audio visualization (if needed)
+function visualizeAudio(stream) {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const analyser = audioContext.createAnalyser();
+    const source = audioContext.createMediaStreamSource(stream);
+    source.connect(analyser);
+    
+    analyser.fftSize = 2048;
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    
+    function draw() {
+        const canvas = document.getElementById('visualizer');
+        if (!canvas) return;
+        
+        const ctx = canvas.getContext('2d');
+        const width = canvas.width;
+        const height = canvas.height;
+        
+        requestAnimationFrame(draw);
+        analyser.getByteTimeDomainData(dataArray);
+        
+        ctx.fillStyle = 'rgb(200, 200, 200)';
+        ctx.fillRect(0, 0, width, height);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = 'rgb(0, 0, 0)';
+        ctx.beginPath();
+        
+        const sliceWidth = width * 1.0 / bufferLength;
+        let x = 0;
+        
+        for (let i = 0; i < bufferLength; i++) {
+            const v = dataArray[i] / 128.0;
+            const y = v * height / 2;
+            
+            if (i === 0) {
+                ctx.moveTo(x, y);
+            } else {
+                ctx.lineTo(x, y);
+            }
+            
+            x += sliceWidth;
+        }
+        
+        ctx.lineTo(canvas.width, canvas.height / 2);
+        ctx.stroke();
+    }
+    
+    draw();
+}
+    </script>
+</body>
+</html>
